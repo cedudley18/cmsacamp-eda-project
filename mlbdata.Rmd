@@ -1,0 +1,240 @@
+---
+title: "mlb data"
+output: html_document
+---
+
+```{r}
+# devtools::install_github("BillPetti/baseballr")
+library(baseballr)
+library(tidyverse)
+library(sportyR)
+
+# Scrape all data for this season:
+mlb_batted_balls_2021 <- 
+  scrape_statcast_savant_batter_all(start_date = "2021-01-01",
+                                    end_date = "2021-06-04") %>%
+  dplyr::filter(type == "X")
+
+mlb_batted_balls_2021 <- mlb_batted_balls_2021 %>%
+  # Only select columns regarding the batted ball with discrete pitch type
+  # information (except for the speed) for now: 
+  dplyr::select(# Batter info:
+                player_name, batter, stand, 
+                # Batted ball info:
+                events, hc_x, hc_y, hit_distance_sc, launch_speed, launch_angle,
+                hit_location, bb_type, barrel,
+                # Pitch info:
+                pitch_type, release_speed, effective_speed, 
+                # Shift info:
+                if_fielding_alignment, of_fielding_alignment,
+                # Game level context:
+                game_date, balls, strikes, outs_when_up, on_1b, on_2b, on_3b, 
+                inning, inning_topbot, home_score, away_score, post_home_score,
+                post_away_score,
+                # Description of play:
+                des)
+```
+
+
+
+```{r}
+mlb_batted_balls_2021 %>%
+  filter(bb_type == "line_drive") %>%
+  ggplot(aes(x = hc_x, y = -1 * hc_y, alpha = 0.2, 
+             color = as.factor(barrel))) + 
+  geom_point() + 
+  theme_minimal()
+```
+
+```{r}
+mlb_batted_balls_2021 %>%
+  filter(events %in% c("single", "double", "triple", "home_run")) %>%
+  filter(effective_speed > 0) %>%
+  ggplot(aes(x = effective_speed,
+             y = launch_angle,
+             color = events)) + 
+  geom_point()
+```
+
+```{r}
+better_players <- mlb_batted_balls_2021 %>%
+  group_by(player_name) %>% 
+  mutate(atbats = n()) 
+```
+
+
+```{r}
+better_players %>%
+  ggplot(aes(x = atbats)) +
+  stat_ecdf() +
+  theme_bw() +
+  labs(x = "At bats",
+       y = "Proportion of MLB players") +
+  geom_vline(xintercept = 15, #<<
+             linetype = "dashed", #<<
+             color = "darkred") #<<
+```
+
+```{r}
+better_players <- better_players %>%
+  filter(atbats > 15)
+```
+
+
+
+
+```{r}
+better_players %>%
+   filter(effective_speed > 60) %>%
+  ggplot(aes(x = effective_speed,
+             y = launch_angle,
+             color = events)) + 
+  geom_point() + 
+  theme_minimal()
+```
+```{r}
+better_players %>%
+   filter(effective_speed > 60) %>%
+  ggplot(aes(x = launch_angle,
+             y = hit_distance_sc,
+             color = events)) + 
+  geom_point() +
+  theme_minimal()
+```
+
+```{r}
+better_players %>%
+   filter(effective_speed > 60,
+          events %in% (c("single", "triple", "double", "home_run"))) %>%
+  ggplot(aes(x = launch_angle,
+             y = hit_distance_sc,
+             color = events)) + 
+  geom_point() +
+  theme_minimal()
+```
+
+
+Three hypotheses:
+1. Left-handed versus right-handed batters ball location, maybe varying by hit type
+2. CDF of players' hit distances, facet_wrap by people who are more successful(more at bats?)
+3. Cluster?
+```{r}
+filtered_mlb <-
+better_players %>%
+  mutate(pitch_type_reduced = case_when(
+            pitch_type == "FA" ~ "F",
+            pitch_type == "FF" ~ "F",
+            pitch_type == "FC" ~ "F",
+            pitch_type == "FS" ~ "F",
+            TRUE ~ pitch_type)) %>%
+  filter(release_speed > 60,
+         hit_distance_sc > 20,
+         pitch_type_reduced == "F",
+         !is.na(release_speed),
+         !is.na(hit_distance_sc)
+         )
+```
+
+
+
+```{r}
+filtered_mlb %>%
+  ggplot(aes(x = release_speed, y = hit_distance_sc, color = pitch_type)) +
+  geom_point(alpha = 0.5) + 
+  theme_minimal()
+```
+
+```{r}
+head(filtered_mlb)
+```
+```{r}
+is.na(better_players$launch_angle)
+```
+
+
+```{r}
+better_players2 <- 
+  better_players[-c(1)]
+```
+
+```{r}
+better_players2 %>%
+  ggplot(aes(x = launch_angle, y = hit_distance_sc)) + 
+  geom_point() + 
+  ggthemes::scale_color_colorblind() +
+  theme_minimal() 
+  
+```
+
+```{r}
+sum(sapply(better_players, is.na))
+sum(sapply(better_players, is.infinite))
+sum(sapply(better_players, is.nan))
+```
+
+```{r}
+better_players <-
+  better_players %>%
+  dplyr::select("batter", "stand", "events", "hc_x", "hc_y", "hit_distance_sc", "launch_speed", "launch_angle", "bb_type", "barrel", "pitch_type", "release_speed", "effective_speed")
+```
+
+
+```{r}
+player_dist <-
+  dist(dplyr::select(better_players2, launch_angle, hit_distance_sc))
+```
+
+```{r}
+player_dist_matrix <- as.matrix(player_dist)
+rownames(player_dist_matrix) <- better_players2$batter
+```
+
+```{r}
+complete_df <- better_players[complete.cases(better_players),]
+sum(sapply(complete_df, is.na))
+```
+
+```{r}
+better_players_rmna <- better_players %>% drop_na(launch_angle)
+better_players_rmna <- better_players %>% drop_na(hit_distance_sc)
+
+```
+
+```{r}
+summary(better_players_rmna$launch_angle)
+summary(better_players_rmna$hit_distance_sc)
+```
+
+```{r}
+library(cluster)
+complete_df <- na.omit(complete_df)
+num_cols <- unlist(lapply(complete_df, is.numeric))
+complete_df <- complete_df[ , num_cols]  
+complete_df <- scale(complete_df)
+```
+
+
+```{r}
+library(flexclust)
+
+complete_df <- as.data.frame((complete_df))
+
+
+init_mlb_kmeans <- 
+  kmeans(dplyr::select(complete_df,
+                       "launch_angle", "hit_distance_sc"),
+         algorithm = "Lloyd", centers = 4, nstart = 30)
+
+
+
+```
+
+```{r}
+mlb_kmeanspp <-
+  kcca(select(complete_df, as.numeric(complete_df$launch_angle), as.numeric(complete_df$hit_distance_sc)),
+       k = 4, control = list(initcent = "kmeanspp")) 
+```
+
+
+4. Patterns in team stadiums - with hit distances
+
