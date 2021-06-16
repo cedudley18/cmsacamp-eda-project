@@ -103,12 +103,12 @@ better_players %>%
 ```
 
 ```{r}
-better_players %>%
-   filter(effective_speed > 60,
-          events %in% (c("single", "triple", "double", "home_run"))) %>%
+better_players2 %>%
+   filter(effective_speed > 60) %>%
+         # events %in% (c("single", "triple", "double", "home_run"))) %>%
   ggplot(aes(x = launch_angle,
              y = hit_distance_sc,
-             color = events)) + 
+             color = bb_type)) + 
   geom_point() +
   theme_minimal()
 ```
@@ -208,8 +208,8 @@ summary(better_players_rmna$hit_distance_sc)
 ```{r}
 library(cluster)
 complete_df <- na.omit(complete_df)
-num_cols <- unlist(lapply(complete_df, is.numeric))
-complete_df <- complete_df[ , num_cols]  
+# num_cols <- unlist(lapply(complete_df, is.numeric))
+# complete_df <- complete_df[ , num_cols]
 complete_df <- scale(complete_df)
 ```
 
@@ -230,10 +230,159 @@ init_mlb_kmeans <-
 ```
 
 ```{r}
-mlb_kmeanspp <-
-  kcca(select(complete_df, as.numeric(complete_df$launch_angle), as.numeric(complete_df$hit_distance_sc)),
-       k = 4, control = list(initcent = "kmeanspp")) 
+complete_df %>%
+  mutate(player_clusters = as.factor(init_mlb_kmeans$cluster)) %>%
+  ggplot(aes(x = launch_angle, y = hit_distance_sc,
+             color = player_clusters)) +
+  geom_point(alpha = 0.5) + 
+  theme_bw() +
+  ggthemes::scale_color_colorblind()
 ```
+
+```{r}
+mlb_kmeanspp <-
+  kcca(dplyr::select(complete_df, launch_angle, hit_distance_sc), 
+       k = 4, control = list(initcent = "kmeanspp"))
+
+complete_df %>%
+  mutate(player_clusters = 
+           as.factor(mlb_kmeanspp@cluster)) %>%
+  ggplot(aes(x = launch_angle, y = hit_distance_sc,
+             color = player_clusters)) +
+  geom_point(alpha = 0.75) + 
+  theme_bw() +
+  ggthemes::scale_color_colorblind()
+```
+
+```{r}
+# Distance matrix
+player_dist <- 
+  dist(dplyr::select(complete_df, launch_angle, hit_distance_sc))
+player_dist_matrix <- as.matrix(player_dist)
+rownames(player_dist_matrix) <- complete_df$batter
+colnames(player_dist_matrix) <- complete_df$batter
+player_dist_matrix[1:3, 1:3]
+```
+
+```{r}
+long_dist_matrix <- 
+  as_tibble(player_dist_matrix) %>%
+  mutate(batter1 = rownames(player_dist_matrix)) %>%
+  pivot_longer(cols = -batter1,
+               names_to = "batter2", values_to = "distance")
+```
+
+```{r}
+mlb_complete_hclust <-
+  hclust(player_dist, method = "complete")
+```
+
+
+```{r}
+complete_df %>%
+  mutate(player_clusters = 
+           as.factor(cutree(mlb_complete_hclust, k = 4))) %>%
+  ggplot(aes(x = launch_angle, y = hit_distance_sc,
+             color = player_clusters)) +
+  geom_point(alpha = 0.75) + 
+  theme_bw() + ggthemes::scale_color_colorblind() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+plot(mlb_complete_hclust)
+```
+
+```{r}
+library(ggdendro)
+ggdendrogram(mlb_complete_hclust, theme_dendro = FALSE,
+             labels = FALSE, leaf_labels = FALSE)  +
+  labs(y = "Dissimilarity between clusters") +
+  theme_bw() + 
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.grid = element_blank()) +
+  geom_hline(yintercept = 20, linetype = "dashed",
+             color = "darkred") +
+  geom_hline(yintercept = 16, linetype = "dashed", 
+             color = "darkblue")
+
+complete_df %>%
+  mutate(player_clusters = 
+           as.factor(cutree(mlb_complete_hclust, h = 16))) %>%
+  ggplot(aes(x = launch_angle, y = hit_distance_sc,
+             color = player_clusters)) +
+  geom_point(alpha = 0.75) + 
+  theme_bw() + ggthemes::scale_color_colorblind() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+library(protoclust)
+```
+
+```{r}
+mlb_minimax <- protoclust(player_dist)
+```
+
+```{r}
+ggdendrogram(mlb_minimax, theme_dendro = FALSE,
+             labels = FALSE, leaf_labels = FALSE)  +
+  labs(y = "Maximum dissimilarity from prototype") +
+  theme_bw() + 
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.grid = element_blank()) 
+```
+
+```{r}
+minimax_player_clusters <- 
+  protocut(mlb_minimax, k = 4)
+
+base_minimax_plot <-
+  complete_df %>%
+  mutate(player_clusters = 
+           as.factor(minimax_player_clusters$cl)) %>%
+  ggplot(aes(x = launch_angle, y = hit_distance_sc,
+             color = player_clusters)) +
+  geom_point(alpha = 0.75) + 
+  theme_bw() + ggthemes::scale_color_colorblind() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+better_players2 <- as.data.frame(better_players2)
+cols <-
+  better_players2 %>%
+  dplyr::select(batter, pitch_type, events, bb_type)
+```
+
+```{r}
+cols <-
+  cols %>%
+  mutate(batter = scale(batter))
+```
+
+```{r}
+complete_df <-
+  left_join(complete_df, cols, by = batter)
+```
+
+
+
+```{r}
+  base_minimax_plot +
+  geom_point(data = slice(complete_df,
+                          minimax_player_clusters$protos),
+             color = "darkred", size = 4)
+
+table("Clusters" = minimax_player_clusters$cl,
+      "Positions" = complete_df$events)
+ 
+```
+
 
 
 4. Patterns in team stadiums - with hit distances
